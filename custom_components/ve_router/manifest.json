@@ -1,0 +1,10 @@
+{
+  "domain": "ve_router",
+  "name": "RMS VE",
+  "version": "0.2.0",
+  "config_flow": true,
+  "iot_class": "local_polling",
+  "integration_type": "hub",
+  "requirements": [],
+  "author": "GeoSR"
+}
