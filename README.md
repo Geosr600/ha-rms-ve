@@ -1,11 +1,5 @@
 # RMS VE - v0.2.0
 
-## Installation
-1. Copier `custom_components/ve_router` dans `/config/custom_components/`
-2. Redémarrer Home Assistant
-3. Ajouter l'intégration `RMS VE`
-
-
 ## Toutes les informations disponibles dans l'éditeur
 - Mode de fonctionnement
 - Régulation auto VE disponible
