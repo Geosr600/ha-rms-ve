@@ -4,37 +4,7 @@
 1. Copier `custom_components/ve_router` dans `/config/custom_components/`
 2. Redémarrer Home Assistant
 3. Ajouter l'intégration `RMS VE`
-4. Ajouter les ressources Lovelace suivantes :
-   - `/ve_router/frontend/rms-ve-card.js` (module)
-   - `/ve_router/frontend/rms-ve-card-editor.js` (module)
-   - `/ve_router/frontend/rms-ve-strategy.js` (module)
 
-## Carte manuelle
-```yaml
-type: custom:rms-ve-card
-title: Borne de recharge
-compact: true
-```
-
-## Strategy
-```yaml
-strategy:
-  type: custom:rms-ve-strategy
-  title: Borne de recharge
-  compact: true
-  show_router_selector: true
-  show_mode_buttons: true
-  show_current_slider: true
-  show_gauge: true
-  rows:
-    - mode
-    - auto_reg
-    - state
-    - power
-    - energy
-    - time
-    - u_reseau
-```
 
 ## Toutes les informations disponibles dans l'éditeur
 - Mode de fonctionnement
