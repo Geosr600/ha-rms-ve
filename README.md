@@ -1,4 +1,4 @@
-# RMS VE - v0.1.5
+# RMS VE - v0.2.0
 
 ## Installation
 1. Copier `custom_components/ve_router` dans `/config/custom_components/`
