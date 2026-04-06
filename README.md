@@ -1,102 +1,122 @@
-# RMS VE F1ATB – Home Assistant Integration
+# ⚡ RMS VE F1ATB – Home Assistant Integration
 
-Intégration Home Assistant permettant de piloter une borne de recharge VE RMS (version H3rv3 / Pedro) via API REST locale.
+Intégration Home Assistant pour piloter une borne de recharge VE RMS (H3rv3 / Pedro) via API REST locale.
 
-> ⚠️ Cette intégration est une interface de commande.  
-> Elle ne gère pas la logique énergétique : celle-ci est assurée par le RMS F1ATB.
+> 🔌 Contrôle direct • 🏠 Local • ⚡ Compatible surplus photovoltaïque
 
 ---
 
-## 🎯 Objectif
+## 🚀 Pourquoi cette intégration ?
 
-Cette intégration expose les commandes et états de la borne VE RMS dans Home Assistant afin de :
+Cette intégration permet d’intégrer votre borne RMS VE directement dans Home Assistant pour :
 
-- Contrôler les modes de fonctionnement
-- Ajuster le courant de charge
-- Superviser l’état de la borne
-- Intégrer la recharge dans vos automatisations Home Assistant
+* 🔄 Automatiser la recharge
+* ☀️ Exploiter le surplus photovoltaïque
+* 🎯 Ajuster finement le courant de charge
+* 🧠 Intégrer la borne dans vos scénarios énergétiques
+
+⚠️ **Important :**
+Cette intégration fournit les commandes.
+La logique énergétique reste gérée par le RMS F1ATB.
 
 ---
 
 ## ⚙️ Fonctionnalités
 
-- Changement de mode :
-  - Automatique
-  - Manuel
-  - Semi-automatique
-  - Heures creuses
-  - Arrêt
+### 🔌 Contrôle de la borne
 
-- Réglage du courant de charge (mode manuel)
+* Modes disponibles :
 
-- Lecture des états :
-  - État de la liaison VE (A/B/C/D/F)
-  - Mode actif
-  - Données remontées via API `/data`
+  * Automatique
+  * Manuel
+  * Semi-automatique
+  * Heures creuses
+  * Arrêt
 
-- Intégration simple via REST (locale, sans cloud)
+### ⚡ Gestion de la charge
 
----
+* Réglage du courant de charge
+* Pilotage en temps réel via Home Assistant
 
-## 🧱 Architecture
+### 📊 Supervision
 
-- Communication directe avec la borne RMS VE via API HTTP
-- Basée sur le firmware RMS VE (ESP32)
-- Compatible avec les versions :
-  - H3rv3 (carte dédiée)
-  - Pedro (ESP32 + Arduino)
+* État de la liaison VE (A/B/C/D/F)
+* Mode actif
+* Données API (`/data`)
 
 ---
 
 ## 🏠 Intégration Home Assistant
 
-L’intégration crée :
+L’intégration ajoute :
 
-- Des entités pour :
-  - Le mode
-  - Le courant
-  - L’état de la borne
+### Entités
 
-- Des services pour :
-  - Changer le mode
-  - Ajuster le courant
+* Mode de fonctionnement
+* Courant de charge
+* État de la borne
+
+### Services
+
+* Changement de mode
+* Réglage du courant
+
+---
+
+## 🧱 Architecture
+
+* Communication locale via HTTP (API REST)
+* ESP32 RMS VE
+* Compatible :
+
+  * Version H3rv3
+  * Version Pedro
 
 ---
 
 ## ⚠️ Limites
 
-- Pas de logique embarquée (pilotage intelligent à faire côté HA ou RMS)
-- Dépend de la disponibilité de l’API RMS VE
-- Nécessite une borne RMS fonctionnelle sur le réseau local
+* ❌ Pas de logique intelligente intégrée
+* ❌ Dépend de l’API RMS VE
+* ❌ Nécessite une borne fonctionnelle sur le réseau local
 
 ---
 
 ## 📚 Projet RMS VE
 
-Le projet RMS VE est une station de recharge open-source développée autour du système RMS F1ATB.
+Le RMS VE est une solution open-source basée sur le système RMS F1ATB.
 
-### Caractéristiques principales :
+### Fonctionnalités principales :
 
-- Gestion dynamique du surplus photovoltaïque
-- Interface web complète intégrée au RMS
-- Modes avancés (auto, semi-auto, heures creuses)
-- Suivi temps réel de la charge et de l’énergie
-- Support écran OLED (optionnel)
+* ☀️ Gestion du surplus photovoltaïque
+* 📈 Suivi temps réel de la charge
+* ⏱️ Programmation heures creuses
+* 🖥️ Interface web intégrée
+* 📟 Support écran OLED
 
-📖 Documentation complète :  
+📖 Documentation :
 https://acloud9.zaclys.com/index.php/s/73zkjdsWS4FFF32
 
-Présentation du projet :  
+💬 Présentation :
 https://f1atb.fr/forum_f1atb/thread-1717.html
 
 ---
 
 ## 👥 Crédits
 
-Projet RMS VE développé par :
-- Cmichel
-- H3rv3
-- Rakibou
+Projet RMS VE :
 
-Intégration Home Assistant :  
-- GeoSR
+* Cmichel
+* H3rv3
+* Rakibou
+
+Intégration Home Assistant :
+
+* GeoSR
+
+---
+
+## ⭐ Support
+
+Si cette intégration vous est utile :
+👉 pensez à laisser une ⭐ sur GitHub
