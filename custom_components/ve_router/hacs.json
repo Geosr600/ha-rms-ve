@@ -1,6 +1,0 @@
-{
-  "name": "RMS VE",
-  "content_in_root": false,
-  "domains": ["ve_router"],
-  "iot_class": "local_polling"
-}
