@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-import logging
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import VERouterApi
 from .const import (
-    DOMAIN,
     CONF_HOST,
     CONF_NAME,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 
 class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -26,9 +22,9 @@ class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
-            scan = int(user_input[CONF_SCAN_INTERVAL])
+            scan_interval = int(user_input[CONF_SCAN_INTERVAL])
 
-            if scan < 1 or scan > 60:
+            if scan_interval < 1 or scan_interval > 60:
                 errors["base"] = "invalid_interval"
             else:
                 session = async_get_clientsession(self.hass)
@@ -36,7 +32,6 @@ class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 try:
                     data = await api.async_test_connection()
-
                     if "state" not in data:
                         errors["base"] = "invalid_response"
                     else:
@@ -48,53 +43,54 @@ class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             data={
                                 CONF_NAME: user_input[CONF_NAME],
                                 CONF_HOST: host,
-                                CONF_SCAN_INTERVAL: scan,
+                                CONF_SCAN_INTERVAL: scan_interval,
                             },
                         )
-
-                except Exception as e:
-                    _LOGGER.error("Connection error: %s", e)
+                except Exception:
                     errors["base"] = "cannot_connect"
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_NAME, default="Borne VE"): str,
-                    vol.Required(CONF_HOST): str,
-                    vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
-                }
-            ),
-            errors=errors,
-        )
+        schema = vol.Schema({
+            vol.Required(CONF_NAME, default="Borne de recharge"): str,
+            vol.Required(CONF_HOST): str,
+            vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
+        })
+
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
     async def async_step_reconfigure(self, user_input=None):
         entry = self._get_reconfigure_entry()
         errors = {}
 
         if user_input is not None:
-            scan = int(user_input[CONF_SCAN_INTERVAL])
+            host = user_input[CONF_HOST].strip()
+            scan_interval = int(user_input[CONF_SCAN_INTERVAL])
 
-            if scan < 1 or scan > 60:
+            if scan_interval < 1 or scan_interval > 60:
                 errors["base"] = "invalid_interval"
             else:
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data_updates={
-                        CONF_NAME: user_input[CONF_NAME],
-                        CONF_HOST: user_input[CONF_HOST],
-                        CONF_SCAN_INTERVAL: scan,
-                    },
-                )
+                session = async_get_clientsession(self.hass)
+                api = VERouterApi(session, host)
 
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_NAME, default=entry.data.get(CONF_NAME)): str,
-                    vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST)): str,
-                    vol.Required(CONF_SCAN_INTERVAL, default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): int,
-                }
-            ),
-            errors=errors,
-        )
+                try:
+                    data = await api.async_test_connection()
+                    if "state" not in data:
+                        errors["base"] = "invalid_response"
+                    else:
+                        return self.async_update_reload_and_abort(
+                            entry,
+                            data_updates={
+                                CONF_NAME: user_input[CONF_NAME],
+                                CONF_HOST: host,
+                                CONF_SCAN_INTERVAL: scan_interval,
+                            },
+                        )
+                except Exception:
+                    errors["base"] = "cannot_connect"
+
+        schema = vol.Schema({
+            vol.Required(CONF_NAME, default=entry.data.get(CONF_NAME, "Borne de recharge")): str,
+            vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST, "")): str,
+            vol.Required(CONF_SCAN_INTERVAL, default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): int,
+        })
+
+        return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)
