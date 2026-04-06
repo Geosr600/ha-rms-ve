@@ -3,26 +3,30 @@
     "step": {
       "user": {
         "title": "Configurer RMS VE",
+        "description": "Saisissez le nom du pont, l'adresse IP et le polling (1 à 60 secondes).",
         "data": {
-          "name": "Nom",
+          "name": "Nom de l'équipement",
           "host": "Adresse IP",
-          "scan_interval": "Intervalle de mise \u00e0 jour"
+          "scan_interval": "Polling (1 à 60 secondes)"
         }
       },
       "reconfigure": {
         "title": "Reconfigurer RMS VE",
-        "description": "Modifiez le nom, l'adresse IP et le polling (1 \u00e0 60 secondes).",
+        "description": "Modifiez le nom, l'adresse IP et le polling (1 à 60 secondes).",
         "data": {
-          "name": "Nom",
+          "name": "Nom de l'équipement",
           "host": "Adresse IP",
-          "scan_interval": "Polling (secondes)"
+          "scan_interval": "Polling (1 à 60 secondes)"
         }
       }
     },
     "error": {
       "cannot_connect": "Connexion impossible",
-      "invalid_response": "R\u00e9ponse invalide",
-      "invalid_interval": "Intervalle invalide (1 \u00e0 60 secondes)"
+      "invalid_response": "Réponse invalide",
+      "invalid_interval": "Intervalle invalide (1 à 60 secondes)"
+    },
+    "abort": {
+      "already_configured": "Ce routeur VE est déjà configuré"
     }
   }
 }
