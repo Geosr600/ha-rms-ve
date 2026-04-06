@@ -40,7 +40,7 @@ La logique énergétique reste gérée par le RMS F1ATB.
 
 ### 📊 Supervision
 
-* État de la liaison VE (A/B/C/D/F)
+* État de la liaison VE (A/B/C/F)
 * Mode actif
 * Données API (`/data`)
 
