@@ -1,10 +1,12 @@
 {
   "domain": "ve_router",
   "name": "RMS VE",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "config_flow": true,
-  "iot_class": "local_polling",
-  "integration_type": "hub",
+  "documentation": "https://github.com/Geosr600/ha-rms-ve",
   "requirements": [],
-  "author": "GeoSR"
+  "codeowners": [
+    "@Geosr600"
+  ],
+  "iot_class": "local_polling"
 }
