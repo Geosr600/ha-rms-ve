@@ -1,4 +1,4 @@
-# RMS VE – Home Assistant Integration
+# RMS VE F1ATB – Home Assistant Integration
 
 Intégration Home Assistant permettant de piloter une borne de recharge VE RMS (version H3rv3 / Pedro) via API REST locale.
 
