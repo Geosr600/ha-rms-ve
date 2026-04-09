@@ -28,5 +28,8 @@
     "abort": {
       "already_configured": "Ce routeur VE est déjà configuré"
     }
+  },
+  "abort": {
+    "reconfigured": "Configuration mise à jour"
   }
 }

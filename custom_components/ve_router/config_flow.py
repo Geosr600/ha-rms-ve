@@ -76,14 +76,17 @@ class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if "state" not in data:
                         errors["base"] = "invalid_response"
                     else:
-                        return self.async_update_reload_and_abort(
+                        self.hass.config_entries.async_update_entry(
                             entry,
-                            data_updates={
+                            title=user_input[CONF_NAME],
+                            data={
                                 CONF_NAME: user_input[CONF_NAME],
                                 CONF_HOST: host,
                                 CONF_SCAN_INTERVAL: scan_interval,
                             },
                         )
+                        await self.hass.config_entries.async_reload(entry.entry_id)
+                        return self.async_abort(reason="reconfigured")
                 except Exception:
                     errors["base"] = "cannot_connect"
 

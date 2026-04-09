@@ -13,8 +13,20 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class VERouterCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass: HomeAssistant, api: VERouterApi, scan_interval: int) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=scan_interval))
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: VERouterApi,
+        scan_interval: int,
+        config_entry=None,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(seconds=scan_interval),
+            config_entry=config_entry,
+        )
         self.api = api
 
     async def _async_update_data(self):

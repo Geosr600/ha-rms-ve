@@ -75,7 +75,7 @@ SENSORS = [
     ("EnergieCharge_Wh", "Recharge cumulée VE", lambda d: _energy_wh(d), "Wh", "mdi:battery-charging", True, False),
     ("TempsCharge_ms", "Temps de charge VE", lambda d: _format_charge_time(_num(d, "TempsCharge_ms", 0)), None, "mdi:timer-outline", True, False),
     ("U_reseau", "U_reseau", lambda d: _num(d, "U_reseau", None), "V", "mdi:sine-wave", True, False),
-    ("cp_pwm_charging", "PWM borne VE", lambda d: _num(d, "cp_pwm_charging", None), "%", "mdi:sine-wave", True, True),
+    ("cp_pwm_charging", "PWM borne VE", lambda d: _num(d, "cp_pwm_charging", None), "%", "mdi:sine-wave", True, False),
     ("nb_depassement_hard", "nb_depassement_hard", lambda d: _num(d, "nb_depassement_hard", None), None, "mdi:alert", True, True),
     ("nb_depassement_soft", "nb_depassement_soft", lambda d: _num(d, "nb_depassement_soft", None), None, "mdi:alert-outline", True, True),
     ("I_max", "I_max", lambda d: _num(d, "I_max", None), "A", "mdi:arrow-collapse-up", True, True),
