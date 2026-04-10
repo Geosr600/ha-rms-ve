@@ -57,3 +57,14 @@ SERVICE_SET_CURRENT = "set_current"
 ATTR_ENTRY_ID = "entry_id"
 ATTR_MODE = "mode"
 ATTR_CURRENT = "current"
+
+CONF_HCHP_ENABLED = "hchp_enabled"
+CONF_HCHP_CURRENT = "hchp_current"
+CONF_HCHP_ENERGY_WH = "hchp_energy_wh"
+
+DEFAULT_HCHP_ENABLED = False
+DEFAULT_HCHP_CURRENT = 10
+DEFAULT_HCHP_ENERGY_WH = 0
+
+STORAGE_VERSION = 1
+STORAGE_KEY_PREFIX = "ve_router_"

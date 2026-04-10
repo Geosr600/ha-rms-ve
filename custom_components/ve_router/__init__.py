@@ -31,7 +31,7 @@ from .const import (
 )
 from .coordinator import VERouterCoordinator
 
-PLATFORMS = ["sensor", "binary_sensor", "number", "select", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "number", "datetime", "select", "button"]
 _LOGGER = logging.getLogger(__name__)
 
 

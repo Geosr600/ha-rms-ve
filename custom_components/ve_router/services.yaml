@@ -13,7 +13,7 @@ set_mode:
       description: Équipement RMS VE cible.
       selector:
         device:
-          integration: ve_router1
+          integration: ve_router
     mode:
       name: Mode
       description: Valeur numérique ou libellé du mode.
@@ -45,7 +45,7 @@ set_current:
       description: Équipement RMS VE cible.
       selector:
         device:
-          integration: ve_router1
+          integration: ve_router
     current:
       name: Courant
       description: Courant manuel en ampères.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -61,6 +61,7 @@ class VERouterModeSelect(CoordinatorEntity, SelectEntity):
 
 
 class _BaseActionSelect(SelectEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
     _option_key = ""
     _default_option = DEFAULT_ON_PLUG_ACTION
 
