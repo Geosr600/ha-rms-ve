@@ -29,6 +29,24 @@ PARAMS: dict[str, dict[str, Any]] = {
         "icon": "mdi:current-ac",
         "cast": "float",
     },
+    "I_min_c1": {
+        "name": "Courant charge min 2",
+        "min": 1,
+        "max": 32,
+        "step": 1,
+        "unit": "A",
+        "icon": "mdi:current-ac",
+        "cast": "float",
+    },
+    "I_max1": {
+        "name": "Courant charge max 2",
+        "min": 1,
+        "max": 32,
+        "step": 1,
+        "unit": "A",
+        "icon": "mdi:current-ac",
+        "cast": "float",
+    },
     "U_reseau": {
         "name": "Tension réseau",
         "min": 180,
@@ -72,6 +90,33 @@ PARAMS: dict[str, dict[str, Any]] = {
         "step": 100,
         "unit": "W",
         "icon": "mdi:home-lightning-bolt",
+        "cast": "float",
+    },
+    "t_delay_boucle": {
+        "name": "Temps d'attente entre traitements",
+        "min": 0,
+        "max": 10000,
+        "step": 10,
+        "unit": "ms",
+        "icon": "mdi:timer-cog-outline",
+        "cast": "int",
+    },
+    "P_seuil_regul": {
+        "name": "Seuil de régulation",
+        "min": -10000,
+        "max": 10000,
+        "step": 10,
+        "unit": "W",
+        "icon": "mdi:tune",
+        "cast": "float",
+    },
+    "I_charge_manual1": {
+        "name": "I charge manual 2",
+        "min": 1,
+        "max": 32,
+        "step": 1,
+        "unit": "A",
+        "icon": "mdi:lightning-bolt",
         "cast": "float",
     },
 }
@@ -135,7 +180,7 @@ class VERouterManualCurrentNumber(VERouterBaseNumber):
         return min(max(value, self.native_min_value), self.native_max_value)
 
     async def async_set_native_value(self, value: float) -> None:
-        await self._api.set_current(int(value))
+        await self._api.set_current(float(value))
         await self.coordinator.async_request_refresh()
 
 
@@ -206,6 +251,8 @@ class VERouterParamNumber(VERouterBaseNumber):
         payload: dict[str, Any] = {
             "I_min_c": float(current.get("I_min_c", 1)),
             "I_max": float(current.get("I_max", 32)),
+            "I_min_c1": float(current.get("I_min_c1", 1)),
+            "I_max1": float(current.get("I_max1", 32)),
             "U_reseau": float(current.get("U_reseau", 240)),
             "P_charge_min": float(current.get("P_charge_min", 1300)),
             "P_charge_max": float(current.get("P_charge_max", -300)),
@@ -217,6 +264,7 @@ class VERouterParamNumber(VERouterBaseNumber):
             "P_seuil_regul": float(current.get("P_seuil_regul", 0)),
             "fact_Icharge": float(current.get("fact_Icharge", 0)),
             "PAbonneReseau": float(current.get("PAbonneReseau", 9000)),
+            "I_charge_manual1": float(current.get("I_charge_manual1", 12)),
         }
 
         if self._cast == "int":

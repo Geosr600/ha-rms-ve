@@ -60,7 +60,7 @@ class VERouterApi:
             resp.raise_for_status()
             await resp.text()
 
-    async def set_current(self, amp: int) -> None:
+    async def set_current(self, amp: float) -> None:
         async with self._session.get(f"{self.base_url}/setCurrent?amp={amp}", timeout=10) as resp:
             resp.raise_for_status()
             await resp.text()
