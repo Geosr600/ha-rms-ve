@@ -38,7 +38,7 @@ Renseignez les champs suivants :
 
 Exemple :
 
-![Configuration de l’intégration](docs/assets/image1.png)
+![Configuration de l’intégration](assets/image1.png)
 
 ## 3. Actions au branchement et au débranchement
 
@@ -51,7 +51,7 @@ Exemples :
 | Véhicule branché | Passer en Auto, Semi-auto, Manuel ou ne rien faire |
 | Véhicule débranché | Passer en Arrêt, Auto ou ne rien faire |
 
-![Actions branchement débranchement](docs/assets/image3.png)
+![Actions branchement débranchement](assets/image3.png)
 
 ## 4. SOC véhicule externe
 
@@ -85,7 +85,7 @@ Réglages disponibles :
 
 Si **Intensité secondaire** est sélectionnée, l’intégration active automatiquement le GPIO14 lorsque le mode concerné est utilisé.
 
-![Configuration SOC et intensité secondaire](docs/assets/image4.png)
+![Configuration SOC et intensité secondaire](assets/image4.png)
 
 ## 6. HC/HP
 
