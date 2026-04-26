@@ -16,7 +16,7 @@ Exemple :
 
 > Le nom exact de l’action dans le routeur n’a pas d’importance. Ce qui compte est son **ordre d’affichage**.
 
-![Actions du routeur VE](docs/assets/image2.png)
+![Actions du routeur VE](assets/image2.png)
 
 ## 2. Configuration initiale de l’intégration
 
