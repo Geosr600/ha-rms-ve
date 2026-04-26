@@ -6,7 +6,7 @@ import voluptuous as vol
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_DEVICE_ID
+from homeassistant.const import ATTR_DEVICE_ID, EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -19,19 +19,26 @@ from .const import (
     CONF_HOST,
     CONF_ON_PLUG_ACTION,
     CONF_ON_UNPLUG_ACTION,
+    CONF_SOC_LIMIT_ENABLED,
+    CONF_TARGET_SOC,
+    CONF_VEHICLE_SOC_ENTITY,
     CONF_SCAN_INTERVAL,
     DEFAULT_ON_PLUG_ACTION,
     DEFAULT_ON_UNPLUG_ACTION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MODE_AUTO,
     MODE_LABELS,
+    MODE_MANUEL,
+    MODE_SEMI_AUTO,
     PLUG_ACTION_TO_MODE,
     SERVICE_SET_CURRENT,
     SERVICE_SET_MODE,
 )
 from .coordinator import VERouterCoordinator
+from .gpio_logic import async_sync_gpio14_for_intensity_source
 
-PLATFORMS = ["sensor", "binary_sensor", "number", "datetime", "select", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "number", "datetime", "select", "switch", "text"]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -85,6 +92,12 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
         await hass.http.async_register_static_paths(
             [StaticPathConfig("/ve_router/frontend", str(frontend_path), False)]
         )
+
+    @callback
+    def _register_resource(_event) -> None:
+        hass.async_create_task(_async_register_card_resource(hass))
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_resource)
     return True
 
 
@@ -129,7 +142,116 @@ async def _apply_vehicle_actions(
         MODE_LABELS[mode],
     )
     await api.set_mode(mode)
+    await async_sync_gpio14_for_intensity_source(
+        coordinator,
+        api,
+        entry,
+        target_mode=mode,
+    )
     await coordinator.async_request_refresh()
+
+
+async def _apply_target_soc_limit(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: VERouterCoordinator,
+    api: VERouterApi,
+) -> None:
+    """Switch back to Auto when the external vehicle SOC reaches the target."""
+    if not bool(entry.options.get(CONF_SOC_LIMIT_ENABLED, False)):
+        return
+
+    current_mode = int(coordinator.data.get("mode", MODE_AUTO) or MODE_AUTO)
+    if current_mode not in {MODE_MANUEL, MODE_SEMI_AUTO}:
+        return
+
+    entity_id = str(entry.options.get(CONF_VEHICLE_SOC_ENTITY, "") or "").strip()
+    if not entity_id:
+        return
+
+    state = hass.states.get(entity_id)
+    if state is None:
+        _LOGGER.debug("Entité SOC véhicule introuvable: %s", entity_id)
+        return
+
+    try:
+        current_soc = float(str(state.state).replace(",", "."))
+    except (TypeError, ValueError):
+        _LOGGER.debug("SOC véhicule non numérique pour %s: %s", entity_id, state.state)
+        return
+
+    try:
+        target_soc = float(entry.options.get(CONF_TARGET_SOC, 80))
+    except (TypeError, ValueError):
+        target_soc = 80.0
+
+    if current_soc < target_soc:
+        return
+
+    _LOGGER.info(
+        "SOC véhicule atteint %.1f%% / %.1f%% sur %s: passage en Auto",
+        current_soc,
+        target_soc,
+        entry.title,
+    )
+    await api.set_mode(MODE_AUTO)
+    await async_sync_gpio14_for_intensity_source(
+        coordinator,
+        api,
+        entry,
+        target_mode=MODE_AUTO,
+    )
+    await coordinator.async_request_refresh()
+
+
+async def _async_register_card_resource(hass: HomeAssistant) -> None:
+    """Best-effort registration of the bundled Lovelace card resource."""
+    resource_url = "/ve_router/frontend/rms-ve-card.js?v=0.7.7"
+
+    try:
+        # Home Assistant stores Lovelace resources in hass.data["lovelace"]["resources"].
+        # Older/variant builds may expose an object with a .resources attribute. Support both.
+        lovelace = hass.data.get("lovelace")
+        resources = None
+        if isinstance(lovelace, dict):
+            resources = lovelace.get("resources")
+        elif lovelace is not None:
+            resources = getattr(lovelace, "resources", None)
+
+        if resources is None:
+            _LOGGER.debug("Lovelace resources API indisponible; carte RMS VE non auto-enregistrée")
+            return
+
+        items_result = resources.async_items() if hasattr(resources, "async_items") else []
+        if hasattr(items_result, "__await__"):
+            items_result = await items_result
+        items = list(items_result or [])
+        for item in items:
+            url = str(item.get("url", ""))
+            if url.startswith("/ve_router/frontend/rms-ve-card.js"):
+                if url == resource_url:
+                    return
+
+                item_id = item.get("id")
+                if item_id and hasattr(resources, "async_update_item"):
+                    await resources.async_update_item(
+                        item_id, {"res_type": "module", "url": resource_url}
+                    )
+                    _LOGGER.info(
+                        "Ressource Lovelace RMS VE mise à jour: %s -> %s",
+                        url,
+                        resource_url,
+                    )
+                    return
+
+                if item_id and hasattr(resources, "async_delete_item"):
+                    await resources.async_delete_item(item_id)
+                    break
+
+        await resources.async_create_item({"res_type": "module", "url": resource_url})
+        _LOGGER.info("Carte Lovelace RMS VE enregistrée automatiquement: %s", resource_url)
+    except Exception as err:
+        _LOGGER.debug("Impossible d'enregistrer automatiquement la carte RMS VE: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -146,10 +268,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
         "vehicle_connected": initial_state in {"B", "C"},
     }
+    # Try again here: async_setup can run before Lovelace resources are initialized.
+    hass.async_create_task(_async_register_card_resource(hass))
+
 
     @callback
     def _handle_coordinator_update() -> None:
         hass.async_create_task(_apply_vehicle_actions(hass, entry, coordinator, api))
+        hass.async_create_task(
+            async_sync_gpio14_for_intensity_source(coordinator, api, entry)
+        )
+        hass.async_create_task(_apply_target_soc_limit(hass, entry, coordinator, api))
 
     remove_listener = coordinator.async_add_listener(_handle_coordinator_update)
     hass.data[DOMAIN][entry.entry_id]["remove_listener"] = remove_listener
@@ -164,6 +293,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             data = hass.data[DOMAIN][target_entry_id]
             mode = _normalize_mode(call.data[ATTR_MODE])
             await data["api"].set_mode(mode)
+            await async_sync_gpio14_for_intensity_source(
+                data["coordinator"],
+                data["api"],
+                hass.config_entries.async_get_entry(target_entry_id),
+                target_mode=mode,
+            )
             await data["coordinator"].async_request_refresh()
 
         hass.services.async_register(
@@ -184,7 +319,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async def handle_set_current(call: ServiceCall) -> None:
             target_entry_id = _entry_id_from_call(hass, call)
             data = hass.data[DOMAIN][target_entry_id]
-            current = int(call.data[ATTR_CURRENT])
+            current = float(call.data[ATTR_CURRENT])
             if current < 1:
                 raise vol.Invalid("Le courant doit être supérieur ou égal à 1 A")
             await data["api"].set_current(current)
@@ -198,7 +333,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 {
                     vol.Optional(ATTR_ENTRY_ID): cv.string,
                     vol.Optional(ATTR_DEVICE_ID): cv.string,
-                    vol.Required(ATTR_CURRENT): vol.Coerce(int),
+                    vol.Required(ATTR_CURRENT): vol.Coerce(float),
                 }
             ),
         )

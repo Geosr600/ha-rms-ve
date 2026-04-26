@@ -47,6 +47,13 @@ class VERouterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as err:
                 _LOGGER.debug("Unable to fetch /getEnergie: %s", err)
 
+            try:
+                actions = await self.api.get_actions()
+                merged.update(actions)
+            except Exception as err:
+                _LOGGER.debug("Unable to fetch /ajax_etatActions: %s", err)
+                merged.setdefault("actions", {})
+
             return merged
         except Exception as err:
             raise UpdateFailed(f"Error communicating with VE router: {err}") from err

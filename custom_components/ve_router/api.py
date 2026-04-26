@@ -65,6 +65,82 @@ class VERouterApi:
             resp.raise_for_status()
             await resp.text()
 
+    async def set_gpio(self, gpio: int, out: bool | int) -> None:
+        value = 1 if bool(out) else 0
+        async with self._session.get(
+            f"{self.base_url}/SetGPIO?gpio={int(gpio)}&out={value}",
+            timeout=10,
+        ) as resp:
+            resp.raise_for_status()
+            await resp.text()
+
+    async def force_action(self, num_action: int, force: int) -> None:
+        async with self._session.get(
+            f"{self.base_url}/ForceAction?Force={int(force)}&NumAction={int(num_action)}",
+            timeout=10,
+        ) as resp:
+            resp.raise_for_status()
+            await resp.text()
+
+    async def get_actions(self) -> dict[str, Any]:
+        async with self._session.get(f"{self.base_url}/ajax_etatActions", timeout=10) as resp:
+            resp.raise_for_status()
+            text = await resp.text()
+        return self._parse_actions_payload(text)
+
+
+    
+    @staticmethod
+    def _parse_actions_payload(text: str) -> dict[str, Any]:
+        gs = chr(29)
+        rs = chr(30)
+        groups = text.split(gs)
+        actions: dict[int, dict[str, Any]] = {}
+
+        for group in groups[4:]:
+            if not group:
+                continue
+            fields = group.split(rs)
+            if len(fields) < 5:
+                continue
+            try:
+                num_action = int(fields[0])
+            except (TypeError, ValueError):
+                continue
+
+            raw_state = fields[2].strip()
+            state_lower = raw_state.lower()
+            if state_lower == "on":
+                is_on = True
+            elif state_lower == "off":
+                is_on = False
+            else:
+                try:
+                    is_on = int(float(raw_state)) > 0
+                except (TypeError, ValueError):
+                    is_on = None
+
+            try:
+                force = int(float(fields[3]))
+            except (TypeError, ValueError):
+                force = 0
+
+            try:
+                hequiv = int(float(fields[4]))
+            except (TypeError, ValueError):
+                hequiv = 0
+
+            actions[num_action] = {
+                "num_action": num_action,
+                "title": fields[1],
+                "raw_state": raw_state,
+                "is_on": is_on,
+                "force": force,
+                "hequiv": hequiv,
+            }
+
+        return {"actions": actions}
+
     async def async_test_connection(self) -> dict[str, Any]:
         data = await self.get_data()
         params = await self.get_params()

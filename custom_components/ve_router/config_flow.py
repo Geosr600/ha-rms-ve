@@ -9,9 +9,24 @@ from .const import (
     CONF_HOST,
     CONF_NAME,
     CONF_SCAN_INTERVAL,
+    CONF_GPIO14_ACTION_NUMBER,
+    CONF_GPIO5_ACTION_NUMBER,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_GPIO14_ACTION_NUMBER,
+    DEFAULT_GPIO5_ACTION_NUMBER,
     DOMAIN,
 )
+
+
+def _schema(defaults: dict | None = None) -> vol.Schema:
+    defaults = defaults or {}
+    return vol.Schema({
+        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "Borne de recharge")): str,
+        vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "")): str,
+        vol.Required(CONF_SCAN_INTERVAL, default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): int,
+        vol.Required(CONF_GPIO14_ACTION_NUMBER, default=defaults.get(CONF_GPIO14_ACTION_NUMBER, DEFAULT_GPIO14_ACTION_NUMBER)): int,
+        vol.Required(CONF_GPIO5_ACTION_NUMBER, default=defaults.get(CONF_GPIO5_ACTION_NUMBER, DEFAULT_GPIO5_ACTION_NUMBER)): int,
+    })
 
 
 class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -44,18 +59,14 @@ class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 CONF_NAME: user_input[CONF_NAME],
                                 CONF_HOST: host,
                                 CONF_SCAN_INTERVAL: scan_interval,
+                                CONF_GPIO14_ACTION_NUMBER: int(user_input[CONF_GPIO14_ACTION_NUMBER]),
+                                CONF_GPIO5_ACTION_NUMBER: int(user_input[CONF_GPIO5_ACTION_NUMBER]),
                             },
                         )
                 except Exception:
                     errors["base"] = "cannot_connect"
 
-        schema = vol.Schema({
-            vol.Required(CONF_NAME, default="Borne de recharge"): str,
-            vol.Required(CONF_HOST): str,
-            vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
-        })
-
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="user", data_schema=_schema(), errors=errors)
 
     async def async_step_reconfigure(self, user_input=None):
         entry = self._get_reconfigure_entry()
@@ -83,6 +94,8 @@ class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 CONF_NAME: user_input[CONF_NAME],
                                 CONF_HOST: host,
                                 CONF_SCAN_INTERVAL: scan_interval,
+                                CONF_GPIO14_ACTION_NUMBER: int(user_input[CONF_GPIO14_ACTION_NUMBER]),
+                                CONF_GPIO5_ACTION_NUMBER: int(user_input[CONF_GPIO5_ACTION_NUMBER]),
                             },
                         )
                         await self.hass.config_entries.async_reload(entry.entry_id)
@@ -90,10 +103,8 @@ class VERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 except Exception:
                     errors["base"] = "cannot_connect"
 
-        schema = vol.Schema({
-            vol.Required(CONF_NAME, default=entry.data.get(CONF_NAME, "Borne de recharge")): str,
-            vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST, "")): str,
-            vol.Required(CONF_SCAN_INTERVAL, default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): int,
-        })
-
-        return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_schema(dict(entry.data)),
+            errors=errors,
+        )

@@ -7,16 +7,20 @@
         "data": {
           "name": "Nom de l'équipement",
           "host": "Adresse IP",
-          "scan_interval": "Polling (1 à 60 secondes)"
+          "scan_interval": "Polling (1 à 60 secondes)",
+          "gpio14_action_number": "Numéro action GPIO14",
+          "gpio5_action_number": "Numéro action GPIO5 HC/HP"
         }
       },
       "reconfigure": {
         "title": "Reconfigurer RMS VE",
-        "description": "Modifiez le nom, l'adresse IP et le polling (1 à 60 secondes).",
+        "description": "Modifiez le nom, l'adresse IP, le polling et les actions forcées.",
         "data": {
           "name": "Nom de l'équipement",
           "host": "Adresse IP",
-          "scan_interval": "Polling (1 à 60 secondes)"
+          "scan_interval": "Polling (1 à 60 secondes)",
+          "gpio14_action_number": "Numéro action GPIO14",
+          "gpio5_action_number": "Numéro action GPIO5 HC/HP"
         }
       }
     },
