@@ -20,6 +20,9 @@ Cette intégration fournit les commandes.
 La logique énergétique reste gérée par le RMS F1ATB.
 
 ---
+## Documentation
+
+📘 [Mode d'emploi complet](docs/MODE_EMPLOI.md)
 
 ## ⚙️ Fonctionnalités
 
