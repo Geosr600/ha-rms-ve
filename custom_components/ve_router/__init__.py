@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 import logging
 import voluptuous as vol
+
+from homeassistant.util import dt as dt_util
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
@@ -10,6 +13,7 @@ from homeassistant.const import ATTR_DEVICE_ID, EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 
 from .api import VERouterApi
 from .const import (
@@ -17,12 +21,19 @@ from .const import (
     ATTR_ENTRY_ID,
     ATTR_MODE,
     CONF_HOST,
+    CONF_GPIO5_ACTION_NUMBER,
+    CONF_GPIO5_FORCE_VALUE,
+    CONF_HC_ENABLED,
+    CONF_HC_START_TIME,
     CONF_ON_PLUG_ACTION,
     CONF_ON_UNPLUG_ACTION,
     CONF_SOC_LIMIT_ENABLED,
     CONF_TARGET_SOC,
     CONF_VEHICLE_SOC_ENTITY,
     CONF_SCAN_INTERVAL,
+    DEFAULT_GPIO5_ACTION_NUMBER,
+    DEFAULT_GPIO5_FORCE_VALUE,
+    DEFAULT_HC_START_TIME,
     DEFAULT_ON_PLUG_ACTION,
     DEFAULT_ON_UNPLUG_ACTION,
     DEFAULT_SCAN_INTERVAL,
@@ -38,7 +49,7 @@ from .const import (
 from .coordinator import VERouterCoordinator
 from .gpio_logic import async_sync_gpio14_for_intensity_source
 
-PLATFORMS = ["sensor", "binary_sensor", "number", "datetime", "select", "switch", "text"]
+PLATFORMS = ["sensor", "binary_sensor", "number", "datetime", "select", "switch", "text", "time"]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -99,6 +110,51 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_resource)
     return True
+
+
+async def _apply_hc_schedule(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: VERouterCoordinator,
+    api: VERouterApi,
+) -> None:
+    """Activate GPIO5 once per day when the user HC schedule is enabled."""
+    if not bool(entry.options.get(CONF_HC_ENABLED, False)):
+        return
+
+    start_time = str(entry.options.get(CONF_HC_START_TIME, DEFAULT_HC_START_TIME) or DEFAULT_HC_START_TIME)
+    now = dt_util.now()
+    if now.strftime("%H:%M") != start_time[:5]:
+        return
+
+    today = now.date().isoformat()
+    entry_state = hass.data[DOMAIN][entry.entry_id]
+    if entry_state.get("last_hc_trigger_date") == today:
+        return
+
+    num_action = int(entry.data.get(CONF_GPIO5_ACTION_NUMBER, DEFAULT_GPIO5_ACTION_NUMBER) or 0)
+    if num_action <= 0:
+        _LOGGER.warning("HC activé mais NumAction GPIO5 invalide pour %s", entry.title)
+        entry_state["last_hc_trigger_date"] = today
+        return
+
+    force_value = int(entry.data.get(CONF_GPIO5_FORCE_VALUE, DEFAULT_GPIO5_FORCE_VALUE) or DEFAULT_GPIO5_FORCE_VALUE)
+    _LOGGER.info(
+        "Heure creuse atteinte sur %s à %s: activation GPIO5 action %s pendant %s min",
+        entry.title,
+        start_time[:5],
+        num_action,
+        force_value,
+    )
+    await api.force_action(num_action, force_value)
+    await async_sync_gpio14_for_intensity_source(
+        coordinator,
+        api,
+        entry,
+        hchp_target_on=True,
+    )
+    entry_state["last_hc_trigger_date"] = today
+    await coordinator.async_request_refresh()
 
 
 async def _apply_vehicle_actions(
@@ -205,53 +261,80 @@ async def _apply_target_soc_limit(
 
 
 async def _async_register_card_resource(hass: HomeAssistant) -> None:
-    """Best-effort registration of the bundled Lovelace card resource."""
-    resource_url = "/ve_router/frontend/rms-ve-card.js?v=0.7.7"
+    """Safely add/update only the RMS VE Lovelace card resource.
+
+    Important: this function preserves every existing Lovelace resource.
+    It only removes/updates entries pointing to rms-ve-card.js to avoid double-loading
+    the same custom element.
+    """
+    resource_url = "/ve_router/frontend/rms-ve-card.js?v=0.8.3"
 
     try:
-        # Home Assistant stores Lovelace resources in hass.data["lovelace"]["resources"].
-        # Older/variant builds may expose an object with a .resources attribute. Support both.
-        lovelace = hass.data.get("lovelace")
-        resources = None
-        if isinstance(lovelace, dict):
-            resources = lovelace.get("resources")
-        elif lovelace is not None:
-            resources = getattr(lovelace, "resources", None)
+        store: Store[dict] = Store(
+            hass,
+            1,
+            "lovelace_resources",
+            minor_version=1,
+        )
+        data = await store.async_load()
+        if not isinstance(data, dict):
+            data = {"items": []}
 
-        if resources is None:
-            _LOGGER.debug("Lovelace resources API indisponible; carte RMS VE non auto-enregistrée")
+        items = data.get("items")
+        if not isinstance(items, list):
+            items = []
+
+        # Preserve all unrelated cards/resources exactly as they are.
+        kept_items = []
+        rms_item = None
+        changed = False
+
+        for item in items:
+            if not isinstance(item, dict):
+                kept_items.append(item)
+                continue
+
+            url = str(item.get("url", ""))
+            if "rms-ve-card.js" not in url:
+                kept_items.append(item)
+                continue
+
+            # This is our own resource. Keep a single RMS VE entry, updated.
+            if rms_item is None:
+                rms_item = dict(item)
+                if rms_item.get("url") != resource_url:
+                    rms_item["url"] = resource_url
+                    changed = True
+                if rms_item.get("res_type") != "module":
+                    rms_item["res_type"] = "module"
+                    changed = True
+                if not rms_item.get("id"):
+                    rms_item["id"] = uuid4().hex
+                    changed = True
+            else:
+                # Duplicate RMS VE resource: remove only the duplicate RMS entry.
+                changed = True
+
+        if rms_item is None:
+            rms_item = {
+                "id": uuid4().hex,
+                "res_type": "module",
+                "url": resource_url,
+            }
+            changed = True
+
+        new_items = kept_items + [rms_item]
+        if new_items != items:
+            changed = True
+
+        if not changed:
             return
 
-        items_result = resources.async_items() if hasattr(resources, "async_items") else []
-        if hasattr(items_result, "__await__"):
-            items_result = await items_result
-        items = list(items_result or [])
-        for item in items:
-            url = str(item.get("url", ""))
-            if url.startswith("/ve_router/frontend/rms-ve-card.js"):
-                if url == resource_url:
-                    return
-
-                item_id = item.get("id")
-                if item_id and hasattr(resources, "async_update_item"):
-                    await resources.async_update_item(
-                        item_id, {"res_type": "module", "url": resource_url}
-                    )
-                    _LOGGER.info(
-                        "Ressource Lovelace RMS VE mise à jour: %s -> %s",
-                        url,
-                        resource_url,
-                    )
-                    return
-
-                if item_id and hasattr(resources, "async_delete_item"):
-                    await resources.async_delete_item(item_id)
-                    break
-
-        await resources.async_create_item({"res_type": "module", "url": resource_url})
-        _LOGGER.info("Carte Lovelace RMS VE enregistrée automatiquement: %s", resource_url)
+        data["items"] = new_items
+        await store.async_save(data)
+        _LOGGER.info("Ressource Lovelace RMS VE enregistrée automatiquement: %s", resource_url)
     except Exception as err:
-        _LOGGER.debug("Impossible d'enregistrer automatiquement la carte RMS VE: %s", err)
+        _LOGGER.warning("Impossible d'enregistrer automatiquement la carte RMS VE: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -267,6 +350,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "api": api,
         "coordinator": coordinator,
         "vehicle_connected": initial_state in {"B", "C"},
+        "last_hc_trigger_date": None,
     }
     # Try again here: async_setup can run before Lovelace resources are initialized.
     hass.async_create_task(_async_register_card_resource(hass))
@@ -279,6 +363,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             async_sync_gpio14_for_intensity_source(coordinator, api, entry)
         )
         hass.async_create_task(_apply_target_soc_limit(hass, entry, coordinator, api))
+        hass.async_create_task(_apply_hc_schedule(hass, entry, coordinator, api))
 
     remove_listener = coordinator.async_add_listener(_handle_coordinator_update)
     hass.data[DOMAIN][entry.entry_id]["remove_listener"] = remove_listener

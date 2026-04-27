@@ -12,6 +12,7 @@ from .const import (
     CONF_GPIO14_FORCE_VALUE,
     CONF_GPIO5_ACTION_NUMBER,
     CONF_GPIO5_FORCE_VALUE,
+    CONF_HC_ENABLED,
     CONF_SOC_LIMIT_ENABLED,
     DOMAIN,
     MANUFACTURER,
@@ -51,6 +52,7 @@ async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> Non
             icon="mdi:clock-outline",
         ),
         VERouterSocLimitSwitch(coordinator, api, entry),
+        VERouterUseHcSwitch(coordinator, api, entry),
     ])
 
 
@@ -178,3 +180,45 @@ class VERouterSocLimitSwitch(CoordinatorEntity, SwitchEntity):
             },
         )
         self.async_write_ha_state()
+
+
+
+class VERouterUseHcSwitch(CoordinatorEntity, SwitchEntity):
+    _attr_name = "Utiliser HC"
+    _attr_unique_id_suffix = "hc_enabled"
+    _attr_icon = "mdi:clock-start"
+
+    def __init__(self, coordinator, api, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._api = api
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{self._attr_unique_id_suffix}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=self._entry.title,
+            manufacturer=MANUFACTURER,
+            model=MODEL,
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._entry.options.get(CONF_HC_ENABLED, False))
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            options={**self._entry.options, CONF_HC_ENABLED: True},
+        )
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            options={**self._entry.options, CONF_HC_ENABLED: False},
+        )
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
