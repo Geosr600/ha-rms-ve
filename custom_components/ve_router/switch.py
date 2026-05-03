@@ -9,11 +9,10 @@ from .gpio_logic import async_sync_gpio14_for_intensity_source
 
 from .const import (
     CONF_GPIO14_ACTION_NUMBER,
-    CONF_GPIO14_FORCE_VALUE,
     CONF_GPIO5_ACTION_NUMBER,
-    CONF_GPIO5_FORCE_VALUE,
     CONF_HC_ENABLED,
     CONF_SOC_LIMIT_ENABLED,
+    DEFAULT_GPIO5_ACTION_NUMBER,
     DOMAIN,
     MANUFACTURER,
     MODEL,
@@ -34,9 +33,7 @@ async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> Non
             name="GPIO 14 - Utilisation I secondaire",
             unique_suffix="gpio14_secondary_current",
             action_key=CONF_GPIO14_ACTION_NUMBER,
-            force_key=CONF_GPIO14_FORCE_VALUE,
             default_action=0,
-            default_force=1440,
             icon="mdi:electric-switch",
         ),
         VERouterForceActionSwitch(
@@ -46,9 +43,7 @@ async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> Non
             name="GPIO 5 - HC/HP",
             unique_suffix="gpio5_hchp",
             action_key=CONF_GPIO5_ACTION_NUMBER,
-            force_key=CONF_GPIO5_FORCE_VALUE,
             default_action=0,
-            default_force=1440,
             icon="mdi:clock-outline",
         ),
         VERouterSocLimitSwitch(coordinator, api, entry),
@@ -66,9 +61,7 @@ class VERouterForceActionSwitch(CoordinatorEntity, SwitchEntity):
         name: str,
         unique_suffix: str,
         action_key: str,
-        force_key: str,
         default_action: int,
-        default_force: int,
         icon: str,
     ) -> None:
         super().__init__(coordinator)
@@ -79,8 +72,6 @@ class VERouterForceActionSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_icon = icon
         self._action_key = action_key
         self._num_action = int(entry.data.get(action_key, default_action))
-        self._force_key = force_key
-        self._default_force = default_force
         self._fallback_state: bool | None = None
 
     @property
@@ -109,8 +100,7 @@ class VERouterForceActionSwitch(CoordinatorEntity, SwitchEntity):
         return self._fallback_state
 
     async def async_turn_on(self, **kwargs) -> None:
-        force_on = int(self._entry.data.get(self._force_key, self._default_force))
-        await self._api.force_action(self._num_action, force_on)
+        await self._api.force_action(self._num_action, 1440)
         if self._action_key == CONF_GPIO5_ACTION_NUMBER:
             await async_sync_gpio14_for_intensity_source(
                 self.coordinator,
@@ -220,5 +210,25 @@ class VERouterUseHcSwitch(CoordinatorEntity, SwitchEntity):
             self._entry,
             options={**self._entry.options, CONF_HC_ENABLED: False},
         )
+        if DOMAIN in self.hass.data and self._entry.entry_id in self.hass.data[DOMAIN]:
+            self.hass.data[DOMAIN][self._entry.entry_id]["hc_window_active"] = False
+
+        # Sécurité : désactiver HC doit aussi couper immédiatement l'action HC côté routeur.
+        # Sans ça, GPIO5 peut rester forcé ON jusqu'à la fin de la durée précédente.
+        num_gpio5 = int(
+            self._entry.data.get(CONF_GPIO5_ACTION_NUMBER, DEFAULT_GPIO5_ACTION_NUMBER) or 0
+        )
+        if num_gpio5 > 0:
+            await self._api.force_action(num_gpio5, FORCE_OFF)
+
+        # Si HC/HP utilisait l'intensité secondaire, GPIO14 peut avoir été activé.
+        # On resynchronise avec HC explicitement OFF pour éviter un état fantôme.
+        await async_sync_gpio14_for_intensity_source(
+            self.coordinator,
+            self._api,
+            self._entry,
+            hchp_target_on=False,
+        )
+
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()

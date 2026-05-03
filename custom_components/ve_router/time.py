@@ -9,7 +9,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_HC_START_TIME,
+    CONF_HC_END_TIME,
     DEFAULT_HC_START_TIME,
+    DEFAULT_HC_END_TIME,
     DOMAIN,
     MANUFACTURER,
     MODEL,
@@ -20,18 +22,33 @@ async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> Non
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     api = data["api"]
-    async_add_entities([VERouterHcStartTime(coordinator, api, entry)])
+    async_add_entities([
+        VERouterHcTime(coordinator, api, entry, name="Heure creuse début", unique_suffix="hc_start_time", option_key=CONF_HC_START_TIME, default_value=DEFAULT_HC_START_TIME, icon="mdi:clock-start"),
+        VERouterHcTime(coordinator, api, entry, name="Heure creuse fin", unique_suffix="hc_end_time", option_key=CONF_HC_END_TIME, default_value=DEFAULT_HC_END_TIME, icon="mdi:clock-end"),
+    ])
 
 
-class VERouterHcStartTime(CoordinatorEntity, TimeEntity):
-    _attr_name = "Heure creuse"
-    _attr_icon = "mdi:clock-start"
-
-    def __init__(self, coordinator, api, entry: ConfigEntry) -> None:
+class VERouterHcTime(CoordinatorEntity, TimeEntity):
+    def __init__(
+        self,
+        coordinator,
+        api,
+        entry: ConfigEntry,
+        *,
+        name: str,
+        unique_suffix: str,
+        option_key: str,
+        default_value: str,
+        icon: str,
+    ) -> None:
         super().__init__(coordinator)
         self._api = api
         self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_hc_start_time"
+        self._option_key = option_key
+        self._default_value = default_value
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}"
+        self._attr_icon = icon
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -44,16 +61,17 @@ class VERouterHcStartTime(CoordinatorEntity, TimeEntity):
 
     @property
     def native_value(self) -> time | None:
-        value = str(self._entry.options.get(CONF_HC_START_TIME, DEFAULT_HC_START_TIME) or DEFAULT_HC_START_TIME)
+        value = str(self._entry.options.get(self._option_key, self._default_value) or self._default_value)
         try:
             hour, minute = value[:5].split(":")
             return time(hour=int(hour), minute=int(minute))
         except (TypeError, ValueError):
-            return time(hour=22, minute=0)
+            fallback_hour, fallback_minute = self._default_value[:5].split(":")
+            return time(hour=int(fallback_hour), minute=int(fallback_minute))
 
     async def async_set_value(self, value: time) -> None:
         self.hass.config_entries.async_update_entry(
             self._entry,
-            options={**self._entry.options, CONF_HC_START_TIME: value.strftime("%H:%M")},
+            options={**self._entry.options, self._option_key: value.strftime("%H:%M")},
         )
         self.async_write_ha_state()

@@ -6,12 +6,10 @@ from homeassistant.config_entries import ConfigEntry
 
 from .const import (
     CONF_GPIO14_ACTION_NUMBER,
-    CONF_GPIO14_FORCE_VALUE,
     CONF_GPIO5_ACTION_NUMBER,
     CONF_HCHP_INTENSITY_SOURCE,
     CONF_MANUAL_INTENSITY_SOURCE,
     DEFAULT_GPIO14_ACTION_NUMBER,
-    DEFAULT_GPIO14_FORCE_VALUE,
     DEFAULT_GPIO5_ACTION_NUMBER,
     INTENSITY_SOURCE_1,
     MODE_MANUEL,
@@ -69,5 +67,4 @@ async def async_sync_gpio14_for_intensity_source(
     if current_on == desired_on:
         return
 
-    force_value = int(entry.data.get(CONF_GPIO14_FORCE_VALUE, DEFAULT_GPIO14_FORCE_VALUE) or DEFAULT_GPIO14_FORCE_VALUE)
-    await api.force_action(num_gpio14, force_value if desired_on else 0)
+    await api.force_action(num_gpio14, 1440 if desired_on else 0)

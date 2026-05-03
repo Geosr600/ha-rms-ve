@@ -8,8 +8,6 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    CONF_GPIO14_FORCE_VALUE,
-    CONF_GPIO5_FORCE_VALUE,
     CONF_TARGET_SOC,
     DEFAULT_TARGET_SOC,
     MIN_TARGET_SOC,
@@ -141,24 +139,6 @@ async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> Non
         VERouterManualCurrentNumber(coordinator, api, entry),
         VERouterEnergyWhNumber(coordinator, api, entry),
         VERouterTargetSocNumber(coordinator, api, entry),
-        VERouterForceDurationNumber(
-            coordinator,
-            api,
-            entry,
-            name="GPIO 14 - Durée forçage ON",
-            unique_suffix="gpio14_force_value",
-            config_key=CONF_GPIO14_FORCE_VALUE,
-            default_value=1440,
-        ),
-        VERouterForceDurationNumber(
-            coordinator,
-            api,
-            entry,
-            name="GPIO 5 - Durée forçage ON",
-            unique_suffix="gpio5_force_value",
-            config_key=CONF_GPIO5_FORCE_VALUE,
-            default_value=1440,
-        ),
     ]
 
     for param_key in PARAMS:
@@ -277,48 +257,6 @@ class VERouterEnergyWhNumber(VERouterBaseNumber):
         date_fin = int(self.coordinator.data.get("energie_dateFin", 0) or 0)
         await self._api.set_energie(int(value), date_fin)
         await self.coordinator.async_request_refresh()
-
-class VERouterForceDurationNumber(VERouterBaseNumber):
-    _attr_mode = NumberMode.BOX
-    _attr_native_unit_of_measurement = "min"
-    _attr_native_step = 1
-    _attr_icon = "mdi:timer-cog-outline"
-
-    def __init__(
-        self,
-        coordinator,
-        api,
-        entry: ConfigEntry,
-        *,
-        name: str,
-        unique_suffix: str,
-        config_key: str,
-        default_value: int,
-    ) -> None:
-        super().__init__(coordinator, api, entry)
-        self._attr_name = name
-        self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}"
-        self._config_key = config_key
-        self._default_value = default_value
-
-    @property
-    def native_min_value(self) -> float:
-        return 0.0
-
-    @property
-    def native_max_value(self) -> float:
-        return 10080.0
-
-    @property
-    def native_value(self) -> float:
-        return float(self._entry.data.get(self._config_key, self._default_value))
-
-    async def async_set_native_value(self, value: float) -> None:
-        new_data = dict(self._entry.data)
-        new_data[self._config_key] = int(value)
-        self.hass.config_entries.async_update_entry(self._entry, data=new_data)
-        self.async_write_ha_state()
-
 
 class VERouterParamNumber(VERouterBaseNumber):
     _attr_entity_category = EntityCategory.CONFIG

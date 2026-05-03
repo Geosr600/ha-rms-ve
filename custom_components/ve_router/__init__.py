@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import timedelta
 from uuid import uuid4
 import logging
 import voluptuous as vol
@@ -22,9 +23,9 @@ from .const import (
     ATTR_MODE,
     CONF_HOST,
     CONF_GPIO5_ACTION_NUMBER,
-    CONF_GPIO5_FORCE_VALUE,
     CONF_HC_ENABLED,
     CONF_HC_START_TIME,
+    CONF_HC_END_TIME,
     CONF_ON_PLUG_ACTION,
     CONF_ON_UNPLUG_ACTION,
     CONF_SOC_LIMIT_ENABLED,
@@ -32,8 +33,8 @@ from .const import (
     CONF_VEHICLE_SOC_ENTITY,
     CONF_SCAN_INTERVAL,
     DEFAULT_GPIO5_ACTION_NUMBER,
-    DEFAULT_GPIO5_FORCE_VALUE,
     DEFAULT_HC_START_TIME,
+    DEFAULT_HC_END_TIME,
     DEFAULT_ON_PLUG_ACTION,
     DEFAULT_ON_UNPLUG_ACTION,
     DEFAULT_SCAN_INTERVAL,
@@ -112,48 +113,116 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
     return True
 
 
+def _parse_hhmm(value: str, default: str) -> int:
+    """Return minutes since midnight for an HH:MM value."""
+    text = str(value or default)[:5]
+    try:
+        hour, minute = text.split(":")
+        return int(hour) * 60 + int(minute)
+    except (TypeError, ValueError):
+        hour, minute = default[:5].split(":")
+        return int(hour) * 60 + int(minute)
+
+
+def _hc_window_state(now_minutes: int, start_minutes: int, end_minutes: int, today) -> tuple[bool, str]:
+    """Return whether now is inside the HC window and a stable window key.
+
+    Supports same-day windows (13:00 -> 16:00) and overnight windows
+    (22:00 -> 06:00). If start == end, the window is treated as disabled.
+    """
+    if start_minutes == end_minutes:
+        return False, ""
+
+    if start_minutes < end_minutes:
+        return start_minutes <= now_minutes < end_minutes, today.isoformat()
+
+    # Overnight window. Between midnight and end time belongs to yesterday's window.
+    if now_minutes >= start_minutes:
+        return True, today.isoformat()
+    if now_minutes < end_minutes:
+        previous_day = today - timedelta(days=1)
+        return True, previous_day.isoformat()
+    return False, today.isoformat()
+
+
+async def _force_hc_off_if_needed(
+    entry_state: dict,
+    coordinator: VERouterCoordinator,
+    api: VERouterApi,
+    entry: ConfigEntry,
+    num_action: int,
+) -> None:
+    actions = (coordinator.data or {}).get("actions", {})
+    action = actions.get(num_action)
+    force_is_on = False
+    if action is not None:
+        try:
+            force_is_on = int(action.get("force", 0) or 0) > 0
+        except (TypeError, ValueError):
+            force_is_on = False
+
+    if entry_state.get("hc_window_active") or force_is_on:
+        await api.force_action(num_action, 0)
+        await async_sync_gpio14_for_intensity_source(
+            coordinator,
+            api,
+            entry,
+            hchp_target_on=False,
+        )
+        entry_state["hc_window_active"] = False
+        await coordinator.async_request_refresh()
+
+
 async def _apply_hc_schedule(
     hass: HomeAssistant,
     entry: ConfigEntry,
     coordinator: VERouterCoordinator,
     api: VERouterApi,
 ) -> None:
-    """Activate GPIO5 once per day when the user HC schedule is enabled."""
+    """Activate GPIO5 during the configured HC window."""
     if not bool(entry.options.get(CONF_HC_ENABLED, False)):
         return
 
     start_time = str(entry.options.get(CONF_HC_START_TIME, DEFAULT_HC_START_TIME) or DEFAULT_HC_START_TIME)
+    end_time = str(entry.options.get(CONF_HC_END_TIME, DEFAULT_HC_END_TIME) or DEFAULT_HC_END_TIME)
     now = dt_util.now()
-    if now.strftime("%H:%M") != start_time[:5]:
-        return
+    now_minutes = now.hour * 60 + now.minute
+    start_minutes = _parse_hhmm(start_time, DEFAULT_HC_START_TIME)
+    end_minutes = _parse_hhmm(end_time, DEFAULT_HC_END_TIME)
+    in_window, window_key = _hc_window_state(now_minutes, start_minutes, end_minutes, now.date())
 
-    today = now.date().isoformat()
     entry_state = hass.data[DOMAIN][entry.entry_id]
-    if entry_state.get("last_hc_trigger_date") == today:
-        return
-
     num_action = int(entry.data.get(CONF_GPIO5_ACTION_NUMBER, DEFAULT_GPIO5_ACTION_NUMBER) or 0)
     if num_action <= 0:
-        _LOGGER.warning("HC activé mais NumAction GPIO5 invalide pour %s", entry.title)
-        entry_state["last_hc_trigger_date"] = today
+        if in_window and entry_state.get("last_hc_trigger_key") != window_key:
+            _LOGGER.warning("HC activé mais NumAction GPIO5 invalide pour %s", entry.title)
+            entry_state["last_hc_trigger_key"] = window_key
         return
 
-    force_value = int(entry.data.get(CONF_GPIO5_FORCE_VALUE, DEFAULT_GPIO5_FORCE_VALUE) or DEFAULT_GPIO5_FORCE_VALUE)
+    if not in_window:
+        await _force_hc_off_if_needed(entry_state, coordinator, api, entry, num_action)
+        return
+
+    if entry_state.get("last_hc_trigger_key") == window_key:
+        entry_state["hc_window_active"] = True
+        return
+
     _LOGGER.info(
-        "Heure creuse atteinte sur %s à %s: activation GPIO5 action %s pendant %s min",
+        "Fenêtre HC active sur %s (%s -> %s): activation GPIO5 action %s",
         entry.title,
         start_time[:5],
+        end_time[:5],
         num_action,
-        force_value,
     )
-    await api.force_action(num_action, force_value)
+    await api.force_action(num_action, 1440)
     await async_sync_gpio14_for_intensity_source(
         coordinator,
         api,
         entry,
         hchp_target_on=True,
     )
-    entry_state["last_hc_trigger_date"] = today
+    entry_state["last_hc_trigger_key"] = window_key
+    entry_state["hc_window_active"] = True
     await coordinator.async_request_refresh()
 
 
@@ -263,19 +332,58 @@ async def _apply_target_soc_limit(
 async def _async_register_card_resource(hass: HomeAssistant) -> None:
     """Safely add/update only the RMS VE Lovelace card resource.
 
-    Important: this function preserves every existing Lovelace resource.
-    It only removes/updates entries pointing to rms-ve-card.js to avoid double-loading
-    the same custom element.
+    Important: Home Assistant stores Lovelace resources with the key
+    `type` in storage, while some runtime APIs use `res_type`.
+    To avoid a blank Type column in the UI, this function always writes
+    both keys when possible and never replaces unrelated resources.
     """
-    resource_url = "/ve_router/frontend/rms-ve-card.js?v=0.8.3"
+    resource_url = "/ve_router/frontend/rms-ve-card.js?v=0.9.1"
+    resource_base = "/ve_router/frontend/rms-ve-card.js"
 
+    # Preferred path: use the Lovelace resource storage collection already loaded by HA.
+    # Do not return early: we still patch storage afterwards to repair old entries
+    # created without a visible `type`.
     try:
-        store: Store[dict] = Store(
-            hass,
-            1,
-            "lovelace_resources",
-            minor_version=1,
-        )
+        lovelace_data = hass.data.get("lovelace")
+        resource_collection = None
+        if isinstance(lovelace_data, dict):
+            resource_collection = lovelace_data.get("resources")
+
+        if resource_collection is not None and hasattr(resource_collection, "async_items"):
+            items = list(resource_collection.async_items())
+            rms_items = [
+                item
+                for item in items
+                if resource_base in str(item.get("url", ""))
+                or "rms-ve-card.js" in str(item.get("url", ""))
+            ]
+
+            payload = {"res_type": "module", "type": "module", "url": resource_url}
+
+            if not rms_items:
+                await resource_collection.async_create_item(payload)
+                _LOGGER.info("Ressource Lovelace RMS VE ajoutée: %s", resource_url)
+            else:
+                first = rms_items[0]
+                first_id = first.get("id")
+                current_type = first.get("type") or first.get("res_type")
+                if first_id and (first.get("url") != resource_url or current_type != "module"):
+                    await resource_collection.async_update_item(first_id, payload)
+                    _LOGGER.info("Ressource Lovelace RMS VE mise à jour: %s", resource_url)
+
+                # Remove only duplicate RMS VE resources, never unrelated resources.
+                if hasattr(resource_collection, "async_delete_item"):
+                    for duplicate in rms_items[1:]:
+                        duplicate_id = duplicate.get("id")
+                        if duplicate_id:
+                            await resource_collection.async_delete_item(duplicate_id)
+    except Exception as err:
+        _LOGGER.debug("Ajout ressource RMS VE via collection Lovelace impossible: %s", err)
+
+    # Storage patch. Preserves every unrelated resource and repairs old RMS entries
+    # where the Type column was blank.
+    try:
+        store: Store[dict] = Store(hass, 1, "lovelace_resources", minor_version=1)
         data = await store.async_load()
         if not isinstance(data, dict):
             data = {"items": []}
@@ -284,7 +392,6 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
         if not isinstance(items, list):
             items = []
 
-        # Preserve all unrelated cards/resources exactly as they are.
         kept_items = []
         rms_item = None
         changed = False
@@ -299,11 +406,13 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
                 kept_items.append(item)
                 continue
 
-            # This is our own resource. Keep a single RMS VE entry, updated.
             if rms_item is None:
                 rms_item = dict(item)
                 if rms_item.get("url") != resource_url:
                     rms_item["url"] = resource_url
+                    changed = True
+                if rms_item.get("type") != "module":
+                    rms_item["type"] = "module"
                     changed = True
                 if rms_item.get("res_type") != "module":
                     rms_item["res_type"] = "module"
@@ -312,12 +421,12 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
                     rms_item["id"] = uuid4().hex
                     changed = True
             else:
-                # Duplicate RMS VE resource: remove only the duplicate RMS entry.
                 changed = True
 
         if rms_item is None:
             rms_item = {
                 "id": uuid4().hex,
+                "type": "module",
                 "res_type": "module",
                 "url": resource_url,
             }
@@ -327,15 +436,12 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
         if new_items != items:
             changed = True
 
-        if not changed:
-            return
-
-        data["items"] = new_items
-        await store.async_save(data)
-        _LOGGER.info("Ressource Lovelace RMS VE enregistrée automatiquement: %s", resource_url)
+        if changed:
+            data["items"] = new_items
+            await store.async_save(data)
+            _LOGGER.info("Ressource Lovelace RMS VE enregistrée automatiquement: %s", resource_url)
     except Exception as err:
         _LOGGER.warning("Impossible d'enregistrer automatiquement la carte RMS VE: %s", err)
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
@@ -350,7 +456,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "api": api,
         "coordinator": coordinator,
         "vehicle_connected": initial_state in {"B", "C"},
-        "last_hc_trigger_date": None,
+        "last_hc_trigger_key": None,
+        "hc_window_active": False,
     }
     # Try again here: async_setup can run before Lovelace resources are initialized.
     hass.async_create_task(_async_register_card_resource(hass))
