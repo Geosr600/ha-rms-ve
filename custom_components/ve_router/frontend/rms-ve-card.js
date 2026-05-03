@@ -438,6 +438,7 @@ class RMSVECard extends BaseElement {
     _pendingManualCurrent: { state: true },
     _pendingTargetSoc: { state: true },
     _manualCommitTimer: { state: false },
+    _showHcSettings: { state: true },
   };
 
   static getStubConfig(hass) {
@@ -454,10 +455,17 @@ class RMSVECard extends BaseElement {
   static styles = css`
     :host {
       display: block;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    * {
+      box-sizing: border-box;
     }
     ha-card {
       padding: 4px 10px 8px;
       border-radius: 24px;
+      overflow: hidden;
+      max-width: 100%;
     }
     .stack {
       display: grid;
@@ -612,13 +620,13 @@ class RMSVECard extends BaseElement {
       background: rgba(var(--rgb-primary-text-color), 0.02);
     }
     .mode-grid {
-      display: flex !important;
-      flex-direction: row !important;
-      flex-wrap: nowrap !important;
+      display: grid !important;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       align-items: stretch;
-      justify-content: space-between;
       gap: 4px;
       width: 100%;
+      max-width: 100%;
+      overflow: hidden;
     }
     .mode-btn {
       cursor: pointer;
@@ -630,10 +638,11 @@ class RMSVECard extends BaseElement {
       transition: 160ms ease;
       user-select: none;
       color: var(--primary-text-color);
-      flex: 1 1 0;
+      width: 100%;
       min-width: 0;
       white-space: nowrap;
       overflow: hidden;
+      position: relative;
     }
     .mode-btn[disabled] {
       opacity: 0.5;
@@ -677,6 +686,75 @@ class RMSVECard extends BaseElement {
       border-color: rgba(79, 195, 247, 0.34);
       color: #81d4fa;
       box-shadow: 0 0 16px rgba(79, 195, 247, 0.20);
+    }
+    .mode-btn.active.mode-hchp .mode-icon {
+      background: rgba(255, 193, 7, 0.18);
+      border-color: rgba(255, 193, 7, 0.36);
+      color: #ffd54f;
+      box-shadow: 0 0 16px rgba(255, 193, 7, 0.20);
+    }
+    .mode-label-with-gear {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .mode-label-with-gear span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .hc-gear {
+      --mdc-icon-size: 14px;
+      color: var(--secondary-text-color);
+      border-radius: 50%;
+      padding: 1px;
+      flex: 0 0 auto;
+    }
+    .hc-gear:hover {
+      color: var(--primary-color);
+      background: rgba(var(--rgb-primary-color), 0.12);
+    }
+    .hc-settings-panel {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .hc-setting-tile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 14px;
+      border: 1px solid var(--divider-color);
+      background: rgba(var(--rgb-primary-text-color), 0.035);
+      min-width: 0;
+    }
+    .hc-setting-tile ha-icon {
+      color: #ffd54f;
+      --mdc-icon-size: 22px;
+      flex: 0 0 auto;
+    }
+    .hc-setting-tile div {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+    .hc-setting-tile span {
+      color: var(--secondary-text-color);
+      font-size: 0.76rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hc-setting-tile strong {
+      font-size: 0.95rem;
+      white-space: nowrap;
     }
     .panel {
       border-radius: 20px;
@@ -1030,17 +1108,16 @@ class RMSVECard extends BaseElement {
         min-width: 126px;
       }
       .mode-grid {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
+        display: grid !important;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 2px;
       }
       .mode-panel {
         padding: 6px 6px;
       }
       .mode-btn {
-        padding: 6px 2px;
-        font-size: 0.82rem;
+        padding: 6px 1px;
+        font-size: 0.76rem;
       }
       .mode-icon {
         width: 34px;
@@ -1081,14 +1158,13 @@ class RMSVECard extends BaseElement {
         min-width: 112px;
       }
       .mode-grid {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
+        display: grid !important;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 1px;
       }
       .mode-btn {
         padding: 5px 0;
-        font-size: 0.70rem;
+        font-size: 0.62rem;
         min-width: 0;
       }
       .mode-icon {
@@ -1097,6 +1173,31 @@ class RMSVECard extends BaseElement {
         border-radius: 9px;
         --mdc-icon-size: 20px;
         margin-bottom: 3px;
+      }
+      .mode-label-with-gear {
+        gap: 1px;
+      }
+      .hc-gear {
+        --mdc-icon-size: 11px;
+        padding: 0;
+      }
+    }
+
+    @media (max-width: 360px) {
+      ha-card {
+        padding-left: 6px;
+        padding-right: 6px;
+      }
+      .mode-btn {
+        font-size: 0.56rem;
+      }
+      .mode-icon {
+        width: 26px;
+        height: 26px;
+        --mdc-icon-size: 18px;
+      }
+      .hc-gear {
+        display: none;
       }
     }
 
@@ -1398,6 +1499,9 @@ class RMSVECard extends BaseElement {
         vehicle_soc_entity: findByUniqueSuffix('_vehicle_soc_entity') || findByName('Entité SOC véhicule') || findByContains('entité', 'soc') || findByContains('entite', 'soc'),
         target_soc: findByUniqueSuffix('_target_soc') || findByName('SOC véhicule cible') || findByContains('soc', 'cible'),
         soc_limit_enabled: findByUniqueSuffix('_soc_limit_enabled') || findByName('Utiliser SOC véhicule cible') || findByContains('utiliser', 'soc'),
+        hc_enabled: findByUniqueSuffix('_hc_enabled') || findByName('Utiliser HC') || findByContains('utiliser', 'hc'),
+        hc_start_time: findByUniqueSuffix('_hc_start_time') || findByName('Heure creuse début') || findByName('Heure creuse') || findByContains('heure', 'creuse', 'début') || findByContains('heure', 'creuse'),
+        hc_end_time: findByUniqueSuffix('_hc_end_time') || findByName('Heure creuse fin') || findByContains('heure', 'creuse', 'fin'),
       };
 
       if (!this._resolved.mode || !this._resolved.current) {
@@ -1441,20 +1545,30 @@ class RMSVECard extends BaseElement {
   _statusSummary() {
     const liaison = this._state(this._resolved?.liaison, 'Inconnu');
     const current = this._num(this._resolved?.current, 0);
+    const text = String(liaison || '').trim();
 
-    // Logique UX stricte :
-    // rouge fixe = déconnecté / erreur liaison
-    // vert pulse = charge en cours
-    // orange fixe = connecté mais en attente
-    if (/défaut|defaut|fault|error|erreur|déconnect|deconnect|disconnect|offline/i.test(liaison)) {
+    // Logique UX basée uniquement sur l'état RMS VE, pas sur le SOC véhicule :
+    // A / Pas de véhicule = Non branché
+    // B / Véhicule connecté = En attente
+    // C / Charge en cours = Charge en cours
+    // Défaut / erreur = défaut liaison
+    if (/^A$/i.test(text) || /pas\s+de\s+v[eé]hicule|non\s+branch[eé]/i.test(text)) {
+      return {
+        kind: 'idle',
+        label: 'Non branché',
+        color: 'var(--disabled-text-color, #9e9e9e)',
+      };
+    }
+
+    if (/d[eé]faut|fault|error|erreur|offline/i.test(text)) {
       return {
         kind: 'fault',
-        label: 'Déconnecté',
+        label: 'Défaut',
         color: 'var(--error-color, #ff4d4f)',
       };
     }
 
-    if (/charge/i.test(liaison) || current > 0.2) {
+    if (/^C$/i.test(text) || /charge/i.test(text) || current > 0.2) {
       return {
         kind: 'charging',
         label: 'Charge en cours',
@@ -1462,9 +1576,17 @@ class RMSVECard extends BaseElement {
       };
     }
 
+    if (/^B$/i.test(text) || /connect/i.test(text) || /v[eé]hicule/i.test(text)) {
+      return {
+        kind: 'connected',
+        label: 'En attente',
+        color: 'var(--warning-color, #f5a623)',
+      };
+    }
+
     return {
       kind: 'connected',
-      label: /connect/i.test(liaison) ? 'Véhicule connecté' : 'En attente',
+      label: 'En attente',
       color: 'var(--warning-color, #f5a623)',
     };
   }
@@ -1588,6 +1710,24 @@ class RMSVECard extends BaseElement {
     await this.hass.callService('switch', enabled ? 'turn_on' : 'turn_off', { entity_id: entity });
   }
 
+  async _setHcEnabled(enabled) {
+    const entity = this._resolved?.hc_enabled;
+    if (!entity) return;
+    await this.hass.callService('switch', enabled ? 'turn_on' : 'turn_off', { entity_id: entity });
+  }
+
+  async _toggleHcEnabled() {
+    const entity = this._resolved?.hc_enabled;
+    if (!entity) return;
+    const enabled = this._stateObj(entity)?.state === 'on';
+    await this._setHcEnabled(!enabled);
+  }
+
+  _toggleHcSettings(ev) {
+    ev?.stopPropagation?.();
+    this._showHcSettings = !this._showHcSettings;
+  }
+
   _showMoreInfo(entityId) {
     if (!entityId) return;
     fireEvent(this, 'hass-more-info', { entityId });
@@ -1687,6 +1827,9 @@ class RMSVECard extends BaseElement {
     const targetSocMax = Number(targetSocState?.attributes?.max ?? 100);
     const socLimitState = this._stateObj(this._resolved?.soc_limit_enabled);
     const socLimitEnabled = socLimitState?.state === 'on';
+    const hcEnabled = this._stateObj(this._resolved?.hc_enabled)?.state === 'on';
+    const hcTime = this._state(this._resolved?.hc_start_time, '—');
+    const hcEndTime = this._state(this._resolved?.hc_end_time, '—');
     const vehicleSoc = this._vehicleSocValue();
     const manualMin = Number(manualState?.attributes?.min ?? 1);
     const manualMax = Number(manualState?.attributes?.max ?? 32);
@@ -1706,7 +1849,20 @@ class RMSVECard extends BaseElement {
               ${this._modeButton('Auto', 'mdi:flash', mode)}
               ${this._modeButton('Semi-auto', 'mdi:sync', mode)}
               ${this._modeButton('Manuel', 'mdi:hand-back-right', mode)}
+              ${this._hcButton(hcEnabled)}
             </div>
+            ${this._showHcSettings ? html`
+              <div class="hc-settings-panel">
+                <div class="hc-setting-tile clickable" @click=${() => this._showMoreInfo(this._resolved?.hc_start_time)} title="Modifier l'heure creuse">
+                  <ha-icon icon="mdi:clock-start"></ha-icon>
+                  <div><span>Heure creuse</span><strong>${hcTime}</strong></div>
+                </div>
+                <div class="hc-setting-tile clickable" @click=${() => this._showMoreInfo(this._resolved?.hc_end_time)} title="Modifier l'heure de fin HC">
+                  <ha-icon icon="mdi:clock-end"></ha-icon>
+                  <div><span>Fin HC</span><strong>${hcEndTime}</strong></div>
+                </div>
+              </div>
+            ` : ''}
           </div>
 
           <div class="status ${status.kind}">
@@ -1813,10 +1969,33 @@ class RMSVECard extends BaseElement {
           ` : ''}
 
           <div class="footer">
-            <span>Carte RMS VE V0.7.0</span>
+            <span>Carte RMS VE V0.9.1</span>
           </div>
         </div>
       </ha-card>
+    `;
+  }
+
+  _hcButton(enabled) {
+    const disabled = !this._resolved?.hc_enabled;
+    return html`
+      <button
+        class="mode-btn mode-hchp ${enabled ? 'active' : ''}"
+        ?disabled=${disabled}
+        @click=${() => this._toggleHcEnabled()}
+        title="Activer ou désactiver HC/HP"
+      >
+        <ha-icon class="mode-icon" icon="mdi:clock-outline"></ha-icon>
+        <div class="mode-label-with-gear">
+          <span>HC/HP</span>
+          <ha-icon
+            class="hc-gear"
+            icon="mdi:cog-outline"
+            title="Réglages HC/HP"
+            @click=${(ev) => this._toggleHcSettings(ev)}
+          ></ha-icon>
+        </div>
+      </button>
     `;
   }
 
