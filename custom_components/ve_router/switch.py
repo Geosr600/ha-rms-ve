@@ -211,7 +211,10 @@ class VERouterUseHcSwitch(CoordinatorEntity, SwitchEntity):
             options={**self._entry.options, CONF_HC_ENABLED: False},
         )
         if DOMAIN in self.hass.data and self._entry.entry_id in self.hass.data[DOMAIN]:
-            self.hass.data[DOMAIN][self._entry.entry_id]["hc_window_active"] = False
+            entry_state = self.hass.data[DOMAIN][self._entry.entry_id]
+            entry_state["hc_window_active"] = False
+            entry_state["hc_charge_launched"] = False
+            entry_state["last_hc_trigger_key"] = None
 
         # Sécurité : désactiver HC doit aussi couper immédiatement l'action HC côté routeur.
         # Sans ça, GPIO5 peut rester forcé ON jusqu'à la fin de la durée précédente.

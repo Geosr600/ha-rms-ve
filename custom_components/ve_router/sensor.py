@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DEVICE_NAME, DOMAIN, MANUFACTURER, MODEL, MODE_LABELS
+from .const import DOMAIN, MANUFACTURER, MODEL, MODE_LABELS
 
 
 def _state_letter(value):
@@ -25,6 +29,10 @@ def _state_text(value):
 
 
 def _format_mode(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return "Inconnu"
     return MODE_LABELS.get(value, "Inconnu")
 
 
@@ -94,6 +102,24 @@ SENSORS = [
     ("PuissanceI_M", "Production-Consommation VE", lambda d: _num(d, "PuissanceI_M", None), "W", "mdi:home-lightning-bolt-outline", False, True),
 ]
 
+# (device_class, state_class) par capteur : active les statistiques long terme
+# et rend l'énergie utilisable dans le tableau de bord Énergie.
+SENSOR_CLASSES: dict[str, tuple[SensorDeviceClass | None, SensorStateClass | None]] = {
+    "I_charge": (SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT),
+    "Puissance_charge_kW": (SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT),
+    "EnergieCharge_Wh": (SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING),
+    "U_reseau": (SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT),
+    "cp_pwm_charging": (None, SensorStateClass.MEASUREMENT),
+    "I_max": (SensorDeviceClass.CURRENT, None),
+    "I_min_c": (SensorDeviceClass.CURRENT, None),
+    "I_max1": (SensorDeviceClass.CURRENT, None),
+    "I_min_c1": (SensorDeviceClass.CURRENT, None),
+    "I_charge_manual1": (SensorDeviceClass.CURRENT, None),
+    "PuissanceS_M": (SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT),
+    "PuissanceI_M": (SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT),
+    "maxWhInput": (SensorDeviceClass.ENERGY, None),
+}
+
 
 async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
@@ -117,6 +143,11 @@ class VERouterSensor(CoordinatorEntity, SensorEntity):
         self._attr_entity_registry_enabled_default = enabled
         if diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        device_class, state_class = SENSOR_CLASSES.get(key, (None, None))
+        if device_class is not None:
+            self._attr_device_class = device_class
+        if state_class is not None:
+            self._attr_state_class = state_class
 
     @property
     def native_value(self):

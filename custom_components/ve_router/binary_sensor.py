@@ -4,7 +4,7 @@ from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .const import DEVICE_NAME, DOMAIN, MANUFACTURER, MODEL
+from .const import DOMAIN, MANUFACTURER, MODEL
 
 
 async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> None:

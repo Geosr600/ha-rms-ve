@@ -54,7 +54,11 @@ class VERouterModeSelect(CoordinatorEntity, SelectEntity):
 
     @property
     def current_option(self):
-        return MODE_LABELS.get(self.coordinator.data.get("mode"), self._attr_options[0])
+        try:
+            mode = int(self.coordinator.data.get("mode"))
+        except (TypeError, ValueError):
+            mode = None
+        return MODE_LABELS.get(mode, self._attr_options[0])
 
     async def async_select_option(self, option: str) -> None:
         mode = MODE_BY_LABEL[option]

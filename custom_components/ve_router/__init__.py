@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import timedelta
-from uuid import uuid4
 import logging
 import voluptuous as vol
 
@@ -14,7 +13,6 @@ from homeassistant.const import ATTR_DEVICE_ID, EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.storage import Store
 
 from .api import VERouterApi
 from .const import (
@@ -39,6 +37,7 @@ from .const import (
     DEFAULT_ON_UNPLUG_ACTION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MODE_ARRET,
     MODE_AUTO,
     MODE_LABELS,
     MODE_MANUEL,
@@ -145,6 +144,30 @@ def _hc_window_state(now_minutes: int, start_minutes: int, end_minutes: int, tod
     return False, today.isoformat()
 
 
+def _hc_window_now(entry: ConfigEntry) -> tuple[bool, str]:
+    """Return (in_window, window_key) for the configured HC window at this moment."""
+    start_time = str(entry.options.get(CONF_HC_START_TIME, DEFAULT_HC_START_TIME) or DEFAULT_HC_START_TIME)
+    end_time = str(entry.options.get(CONF_HC_END_TIME, DEFAULT_HC_END_TIME) or DEFAULT_HC_END_TIME)
+    now = dt_util.now()
+    now_minutes = now.hour * 60 + now.minute
+    start_minutes = _parse_hhmm(start_time, DEFAULT_HC_START_TIME)
+    end_minutes = _parse_hhmm(end_time, DEFAULT_HC_END_TIME)
+    return _hc_window_state(now_minutes, start_minutes, end_minutes, now.date())
+
+
+def _coerce_mode(value) -> int | None:
+    try:
+        mode = int(value)
+    except (TypeError, ValueError):
+        return None
+    return mode if mode in MODE_LABELS else None
+
+
+def _vehicle_connected(coordinator: VERouterCoordinator) -> bool:
+    state = str((coordinator.data or {}).get("state", "")).strip().upper()
+    return state in {"B", "C"}
+
+
 async def _force_hc_off_if_needed(
     entry_state: dict,
     coordinator: VERouterCoordinator,
@@ -170,6 +193,21 @@ async def _force_hc_off_if_needed(
             hchp_target_on=False,
         )
         entry_state["hc_window_active"] = False
+
+        # Fin de plage HC : si la charge avait été lancée par la fenêtre HC et
+        # que le mode est toujours Manuel, on repasse en Auto (charge sur surplus solaire).
+        current_mode = _coerce_mode((coordinator.data or {}).get("mode"))
+        if entry_state.get("hc_charge_launched") and current_mode == MODE_MANUEL:
+            _LOGGER.info("Fin de fenêtre HC sur %s: retour en mode Auto", entry.title)
+            await api.set_mode(MODE_AUTO)
+            await async_sync_gpio14_for_intensity_source(
+                coordinator,
+                api,
+                entry,
+                target_mode=MODE_AUTO,
+                hchp_target_on=False,
+            )
+        entry_state["hc_charge_launched"] = False
         await coordinator.async_request_refresh()
 
 
@@ -179,17 +217,11 @@ async def _apply_hc_schedule(
     coordinator: VERouterCoordinator,
     api: VERouterApi,
 ) -> None:
-    """Activate GPIO5 during the configured HC window."""
+    """Activate GPIO5 during the configured HC window and start charging if a vehicle is plugged."""
     if not bool(entry.options.get(CONF_HC_ENABLED, False)):
         return
 
-    start_time = str(entry.options.get(CONF_HC_START_TIME, DEFAULT_HC_START_TIME) or DEFAULT_HC_START_TIME)
-    end_time = str(entry.options.get(CONF_HC_END_TIME, DEFAULT_HC_END_TIME) or DEFAULT_HC_END_TIME)
-    now = dt_util.now()
-    now_minutes = now.hour * 60 + now.minute
-    start_minutes = _parse_hhmm(start_time, DEFAULT_HC_START_TIME)
-    end_minutes = _parse_hhmm(end_time, DEFAULT_HC_END_TIME)
-    in_window, window_key = _hc_window_state(now_minutes, start_minutes, end_minutes, now.date())
+    in_window, window_key = _hc_window_now(entry)
 
     entry_state = hass.data[DOMAIN][entry.entry_id]
     num_action = int(entry.data.get(CONF_GPIO5_ACTION_NUMBER, DEFAULT_GPIO5_ACTION_NUMBER) or 0)
@@ -208,17 +240,23 @@ async def _apply_hc_schedule(
         return
 
     _LOGGER.info(
-        "Fenêtre HC active sur %s (%s -> %s): activation GPIO5 action %s",
+        "Fenêtre HC active sur %s: activation GPIO5 action %s",
         entry.title,
-        start_time[:5],
-        end_time[:5],
         num_action,
     )
     await api.force_action(num_action, 1440)
+
+    launch_charge = _vehicle_connected(coordinator)
+    if launch_charge:
+        _LOGGER.info("Véhicule branché au début de la fenêtre HC sur %s: passage en Manuel", entry.title)
+        await api.set_mode(MODE_MANUEL)
+        entry_state["hc_charge_launched"] = True
+
     await async_sync_gpio14_for_intensity_source(
         coordinator,
         api,
         entry,
+        target_mode=MODE_MANUEL if launch_charge else None,
         hchp_target_on=True,
     )
     entry_state["last_hc_trigger_key"] = window_key
@@ -232,30 +270,67 @@ async def _apply_vehicle_actions(
     coordinator: VERouterCoordinator,
     api: VERouterApi,
 ) -> None:
-    state = str(coordinator.data.get("state", "")).strip().upper()
-    connected = state in {"B", "C"}
+    connected = _vehicle_connected(coordinator)
 
-    previous_connected = hass.data[DOMAIN][entry.entry_id].get("vehicle_connected")
-    hass.data[DOMAIN][entry.entry_id]["vehicle_connected"] = connected
+    entry_state = hass.data[DOMAIN][entry.entry_id]
+    previous_connected = entry_state.get("vehicle_connected")
+    entry_state["vehicle_connected"] = connected
 
     if previous_connected is None or previous_connected == connected:
         return
 
-    action_key = None
+    hc_enabled = bool(entry.options.get(CONF_HC_ENABLED, False))
+
+    mode = None
     event_label = None
+    action_key = None
 
     if (not previous_connected) and connected:
-        action_key = entry.options.get(CONF_ON_PLUG_ACTION, DEFAULT_ON_PLUG_ACTION)
         event_label = "branchement"
+        in_window, _ = _hc_window_now(entry) if hc_enabled else (False, "")
+        if hc_enabled and in_window:
+            # Branchement pendant la fenêtre HC : on lance la charge.
+            mode = MODE_MANUEL
+            action_key = "hc_charge"
+            entry_state["hc_charge_launched"] = True
+        else:
+            action_key = entry.options.get(CONF_ON_PLUG_ACTION, DEFAULT_ON_PLUG_ACTION)
+            mode = PLUG_ACTION_TO_MODE.get(action_key)
     elif previous_connected and (not connected):
-        action_key = entry.options.get(CONF_ON_UNPLUG_ACTION, DEFAULT_ON_UNPLUG_ACTION)
         event_label = "débranchement"
+        if hc_enabled:
+            # Débranchement avec HC/HP actif : passage en Arrêt et désactivation de HC.
+            _LOGGER.info(
+                "Débranchement du véhicule sur %s: passage en Arrêt et désactivation de HC/HP",
+                entry.title,
+            )
+            await api.set_mode(MODE_ARRET)
+            hass.config_entries.async_update_entry(
+                entry,
+                options={**entry.options, CONF_HC_ENABLED: False},
+            )
+            num_gpio5 = int(entry.data.get(CONF_GPIO5_ACTION_NUMBER, DEFAULT_GPIO5_ACTION_NUMBER) or 0)
+            if num_gpio5 > 0:
+                await api.force_action(num_gpio5, 0)
+            entry_state["hc_window_active"] = False
+            entry_state["hc_charge_launched"] = False
+            entry_state["last_hc_trigger_key"] = None
+            await async_sync_gpio14_for_intensity_source(
+                coordinator,
+                api,
+                entry,
+                target_mode=MODE_ARRET,
+                hchp_target_on=False,
+            )
+            await coordinator.async_request_refresh()
+            return
+        action_key = entry.options.get(CONF_ON_UNPLUG_ACTION, DEFAULT_ON_UNPLUG_ACTION)
+        mode = PLUG_ACTION_TO_MODE.get(action_key)
 
-    mode = PLUG_ACTION_TO_MODE.get(action_key)
     if mode is None:
         return
 
-    current_mode = coordinator.data.get("mode")
+    current_mode = _coerce_mode(coordinator.data.get("mode"))
     if current_mode == mode:
         return
 
@@ -273,6 +348,48 @@ async def _apply_vehicle_actions(
         entry,
         target_mode=mode,
     )
+    await coordinator.async_request_refresh()
+
+
+async def _apply_manual_current_reset(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: VERouterCoordinator,
+    api: VERouterApi,
+) -> None:
+    """Ramène I charge manual au courant minimum quand on quitte le mode Manuel."""
+    entry_state = hass.data[DOMAIN][entry.entry_id]
+    mode = _coerce_mode(coordinator.data.get("mode"))
+    previous_mode = entry_state.get("last_mode")
+    entry_state["last_mode"] = mode
+
+    if mode is None or previous_mode is None:
+        return
+    if previous_mode != MODE_MANUEL or mode == MODE_MANUEL:
+        return
+
+    try:
+        i_min = float(coordinator.data.get("I_min_c", 6) or 6)
+    except (TypeError, ValueError):
+        i_min = 6.0
+    if i_min < 1:
+        i_min = 1.0
+
+    try:
+        current_manual = float(coordinator.data.get("I_charge_manual", i_min))
+    except (TypeError, ValueError):
+        current_manual = i_min
+
+    if current_manual == i_min:
+        return
+
+    _LOGGER.info(
+        "Sortie du mode Manuel sur %s: I charge manual %.0f A -> %.0f A",
+        entry.title,
+        current_manual,
+        i_min,
+    )
+    await api.set_current(i_min)
     await coordinator.async_request_refresh()
 
 
@@ -332,24 +449,25 @@ async def _apply_target_soc_limit(
 async def _async_register_card_resource(hass: HomeAssistant) -> None:
     """Safely add/update only the RMS VE Lovelace card resource.
 
-    Important: Home Assistant stores Lovelace resources with the key
-    `type` in storage, while some runtime APIs use `res_type`.
-    To avoid a blank Type column in the UI, this function always writes
-    both keys when possible and never replaces unrelated resources.
+    Uses exclusively the resource collection loaded by Home Assistant
+    (never writes .storage directly) and never touches unrelated resources.
     """
     resource_url = "/ve_router/frontend/rms-ve-card.js?v=0.9.1"
     resource_base = "/ve_router/frontend/rms-ve-card.js"
 
-    # Preferred path: use the Lovelace resource storage collection already loaded by HA.
-    # Do not return early: we still patch storage afterwards to repair old entries
-    # created without a visible `type`.
     try:
         lovelace_data = hass.data.get("lovelace")
-        resource_collection = None
-        if isinstance(lovelace_data, dict):
+        resource_collection = getattr(lovelace_data, "resources", None)
+        if resource_collection is None and isinstance(lovelace_data, dict):
             resource_collection = lovelace_data.get("resources")
 
-        if resource_collection is not None and hasattr(resource_collection, "async_items"):
+        if resource_collection is None or not hasattr(resource_collection, "async_items"):
+            _LOGGER.info(
+                "Collection de ressources Lovelace indisponible (mode YAML ?). "
+                "Ajoutez manuellement la ressource %s (type: module) si nécessaire.",
+                resource_url,
+            )
+        else:
             items = list(resource_collection.async_items())
             rms_items = [
                 item
@@ -358,7 +476,8 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
                 or "rms-ve-card.js" in str(item.get("url", ""))
             ]
 
-            payload = {"res_type": "module", "type": "module", "url": resource_url}
+            # Le schéma officiel n'accepte que `res_type` et `url`.
+            payload = {"res_type": "module", "url": resource_url}
 
             if not rms_items:
                 await resource_collection.async_create_item(payload)
@@ -378,70 +497,13 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
                         if duplicate_id:
                             await resource_collection.async_delete_item(duplicate_id)
     except Exception as err:
-        _LOGGER.debug("Ajout ressource RMS VE via collection Lovelace impossible: %s", err)
-
-    # Storage patch. Preserves every unrelated resource and repairs old RMS entries
-    # where the Type column was blank.
-    try:
-        store: Store[dict] = Store(hass, 1, "lovelace_resources", minor_version=1)
-        data = await store.async_load()
-        if not isinstance(data, dict):
-            data = {"items": []}
-
-        items = data.get("items")
-        if not isinstance(items, list):
-            items = []
-
-        kept_items = []
-        rms_item = None
-        changed = False
-
-        for item in items:
-            if not isinstance(item, dict):
-                kept_items.append(item)
-                continue
-
-            url = str(item.get("url", ""))
-            if "rms-ve-card.js" not in url:
-                kept_items.append(item)
-                continue
-
-            if rms_item is None:
-                rms_item = dict(item)
-                if rms_item.get("url") != resource_url:
-                    rms_item["url"] = resource_url
-                    changed = True
-                if rms_item.get("type") != "module":
-                    rms_item["type"] = "module"
-                    changed = True
-                if rms_item.get("res_type") != "module":
-                    rms_item["res_type"] = "module"
-                    changed = True
-                if not rms_item.get("id"):
-                    rms_item["id"] = uuid4().hex
-                    changed = True
-            else:
-                changed = True
-
-        if rms_item is None:
-            rms_item = {
-                "id": uuid4().hex,
-                "type": "module",
-                "res_type": "module",
-                "url": resource_url,
-            }
-            changed = True
-
-        new_items = kept_items + [rms_item]
-        if new_items != items:
-            changed = True
-
-        if changed:
-            data["items"] = new_items
-            await store.async_save(data)
-            _LOGGER.info("Ressource Lovelace RMS VE enregistrée automatiquement: %s", resource_url)
-    except Exception as err:
-        _LOGGER.warning("Impossible d'enregistrer automatiquement la carte RMS VE: %s", err)
+        _LOGGER.warning(
+            "Impossible d'enregistrer automatiquement la carte RMS VE (%s). "
+            "Ajoutez manuellement la ressource %s (type: module) dans "
+            "Paramètres > Tableaux de bord > Ressources.",
+            err,
+            resource_url,
+        )
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
@@ -451,32 +513,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})
-    initial_state = str(coordinator.data.get("state", "")).strip().upper()
     hass.data[DOMAIN][entry.entry_id] = {
         "api": api,
         "coordinator": coordinator,
-        "vehicle_connected": initial_state in {"B", "C"},
+        "vehicle_connected": _vehicle_connected(coordinator),
         "last_hc_trigger_key": None,
         "hc_window_active": False,
+        "hc_charge_launched": False,
+        "last_mode": None,
+        "logic_running": False,
     }
     # Try again here: async_setup can run before Lovelace resources are initialized.
     hass.async_create_task(_async_register_card_resource(hass))
 
+    async def _async_run_logic() -> None:
+        """Run all per-tick logic sequentially to avoid racing API calls."""
+        entry_state = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if entry_state is None or entry_state.get("logic_running"):
+            return
+        entry_state["logic_running"] = True
+        try:
+            await _apply_vehicle_actions(hass, entry, coordinator, api)
+            await async_sync_gpio14_for_intensity_source(coordinator, api, entry)
+            await _apply_manual_current_reset(hass, entry, coordinator, api)
+            await _apply_target_soc_limit(hass, entry, coordinator, api)
+            await _apply_hc_schedule(hass, entry, coordinator, api)
+        except Exception as err:
+            _LOGGER.warning("Erreur dans la logique RMS VE pour %s: %s", entry.title, err)
+        finally:
+            entry_state["logic_running"] = False
 
     @callback
     def _handle_coordinator_update() -> None:
-        hass.async_create_task(_apply_vehicle_actions(hass, entry, coordinator, api))
-        hass.async_create_task(
-            async_sync_gpio14_for_intensity_source(coordinator, api, entry)
-        )
-        hass.async_create_task(_apply_target_soc_limit(hass, entry, coordinator, api))
-        hass.async_create_task(_apply_hc_schedule(hass, entry, coordinator, api))
+        hass.async_create_task(_async_run_logic())
 
     remove_listener = coordinator.async_add_listener(_handle_coordinator_update)
     hass.data[DOMAIN][entry.entry_id]["remove_listener"] = remove_listener
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     if not hass.services.has_service(DOMAIN, SERVICE_SET_MODE):
 
@@ -549,7 +623,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, SERVICE_SET_CURRENT)
 
     return unload_ok
-
-
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    await hass.config_entries.async_reload(entry.entry_id)
